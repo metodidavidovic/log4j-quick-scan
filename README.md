@@ -4,15 +4,15 @@ Scan your IP network and determine hosts with possible CVE-2021-44228 vulnerabil
 
 There are far better and advanced tools for security audit, but many of them requires commercial penetration software or external, 3rd party service or software.
 
-This script is written to be quick and independent little tool. It will not confirm that your servers and devices are 100% safe, rather to be one of many tools you should use to secure your IT environment. Can be used on private and public IP addresses.
+This script is written to be quick and independent little tool. It will not confirm that your servers and devices are 100% safe. Consider it as one of many tools you should use to audit your IT environment. Can be used on private and public IP addresses.
 
 Script is not log4shell exploit demonstration. It will not do any harm or try to execute remote code.
 
 ## How test works
 
-Script create HTTP(S) request with special string in these fields: `User-Agent`, `X-Api-Version` and `X-Forwarded-For`. That special string is in format `${jndi:ldap://some_listen_host:port}` .
+Script creates HTTPS (ports ending with 443) or HTTP (all other ports) request, with special string in fields: `User-Agent`, `X-Api-Version` and `X-Forwarded-For`. That special string is in format `${jndi:ldap://some_listen_host:port}` .
 
-If somewhere in “user -> service (load balancers -> security -> servers -> log file)” path, vulnerable log4j library exist and is used to log our http(s) request, it will parse JNDI string and try to establish LDAP session to our `some_listen_host:port`.
+If vulnerable log4j library is used to log user activity (our http request) somewhere in path “user -> service | load balancers -> security -> servers -> logging”, it will parse JNDI string and try to establish LDAP session to our `some_listen_host:port`.
 
 If we monitor traffic on `some_listen_host:port` and spot such packets, their source should be examined further.
 
@@ -45,7 +45,7 @@ Monitor `tcpdump` output on listen host. Targets that are suspects for log4j vul
 
 ## Notes
 
-It is ineffective and extremly slow to scan all ports. Since log4j library is used in many products, determine first what web ports are used in your environment. Run script with your custom port list.
+It is ineffective and extremely slow to scan all ports. Since log4j library is used in many products, determine first what web ports are used in your environment. Run script with your custom port list.
 
 There are too many elements that can prevent script and other tools from external discovering log4j vulnerability. Some of them are: network and server firewalls, web application firewalls, custom tcp ports, software/service do not log low severity events (like our ordinary http request), script access IP address instead of required hostname, etc…
 

